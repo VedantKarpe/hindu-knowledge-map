@@ -22,6 +22,8 @@
     tgt: null, panT: null, collapsed: {}, q: '', fChap: null, fBook: null, hideType: {}
   };
   var VW = 380, laneK = 1;
+  var DWELL = 5000;   // ms spent at each node while the tour plays
+  var tour = { active: false, playing: false, ended: false, i: 0, order: [], node: null, until: 0, remaining: 0, zoom: 1 };
   var pts = {}, pd = 0, pa = 0;
   var G, byId = {}, edgeById = {}, items = [], edgeObjs = [], rows = 1, dirty = true;
 
@@ -516,6 +518,10 @@
     if (n.group && state.collapsed[n.group]) { state.collapsed[n.group] = false; layout(); updateButtons(); }
     state.sel = id; state.selE = null;
     panTo(n.tY);
+    if (tour.active && !state.fromTour) {
+      var k = tour.order.indexOf(n);
+      if (k >= 0) { tour.i = k; tour.node = n; tour.ended = false; pauseTour(); showCaption(n); }
+    }
     var isEvent = n.type === 'event';
     var h = '<p class="detail-title">#' + n.no + ' ' + esc(n.label) + '</p>' +
       '<p class="detail-sub">' + esc(TYPE_NAME[n.type] || n.type) + ' &middot; chapter ' + n.chapter +
@@ -587,7 +593,7 @@
       });
     });
     render();
-    detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!state.fromTour) detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function clearSel() {
@@ -639,10 +645,87 @@
 
   // ---------- controls ----------
 
+  // ---------- tour: fly from node to node in 3D ----------
+
+  function firstSentence(t) {
+    t = String(t || '');
+    var m = t.match(/^.*?[.!?](\s|$)/);
+    return (m ? m[0] : t).trim();
+  }
+
+  function showCaption(n, note) {
+    var c = document.getElementById('caption');
+    if (!c) return;
+    c.innerHTML = '<strong>#' + n.no + ' ' + esc(n.label) + '</strong> <span class="muted">' +
+      esc(TYPE_NAME[n.type] || n.type) + ' &middot; ' + (tour.i + 1) + ' of ' + tour.order.length + '</span>' +
+      '<div>' + (note ? esc(note) : txt(firstSentence(n.what))) + '</div>';
+    c.hidden = false;
+  }
+
+  function hideCaption() {
+    var c = document.getElementById('caption');
+    if (c) c.hidden = true;
+  }
+
+  function tourGo(i) {
+    tour.i = clamp(i, 0, tour.order.length - 1);
+    var n = tour.order[tour.i];
+    tour.node = n; tour.ended = false;
+    state.fromTour = true;
+    try { pickNode(n.id); } finally { state.fromTour = false; }
+    showCaption(n);
+    tour.until = performance.now() + DWELL;
+    updateButtons();
+  }
+
+  function startTour() {
+    if (state.story >= 0) setStory(-1);
+    var any = false;
+    G.groups.forEach(function (g) { if (state.collapsed[g.id]) { state.collapsed[g.id] = false; any = true; } });
+    if (any) layout();
+    tour.order = G.nodes.filter(function (n) { return n.match; }).sort(function (a, b) { return a.no - b.no; });
+    if (tour.order.length < 2) tour.order = G.nodes.slice().sort(function (a, b) { return a.no - b.no; });
+    state.auto = false;
+    setMode('3d');
+    tour.active = true; tour.playing = true;
+    tour.zoom = laneK > 1.5 ? 1.15 : 0.95;
+    tourGo(0);
+    // On a phone the graph sits below the controls, so bring it into view once, when the tour starts.
+    document.getElementById('graph-wrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function pauseTour() {
+    if (!tour.playing) return;
+    tour.playing = false;
+    tour.remaining = Math.max(0, tour.until - performance.now());
+    updateButtons();
+  }
+
+  function resumeTour() {
+    tour.playing = true;
+    tour.until = performance.now() + Math.max(1500, tour.remaining || DWELL);
+    updateButtons();
+  }
+
+  function stopTour() {
+    if (!tour.active) return;
+    tour.active = false; tour.playing = false; tour.ended = false; tour.node = null;
+    hideCaption();
+    clearSel();
+    updateButtons();
+  }
+
+  function zoomTo(z) {
+    state.zm = clamp(z, 0.4, 3);
+    if (tour.active) tour.zoom = state.zm;
+    dirty = true;
+  }
+
   function setMode(m) {
     var was = state.mode;
     state.mode = m;
     if (m === 'flat') {
+      stopTour();
       state.tgt = { a: 0, t: 0, r: 0 }; state.depthT = 0; state.auto = false;
       if (was === '3d') fit();
     } else {
@@ -658,11 +741,16 @@
     var spin = document.getElementById('spin');
     spin.style.display = flat ? 'none' : '';
     spin.textContent = state.auto ? 'Pause spin' : 'Spin';
+    var tb = document.getElementById('tour');
+    tb.textContent = !tour.active ? 'Start tour' : tour.playing ? 'Pause tour' : (tour.ended ? 'Replay tour' : 'Resume tour');
+    document.getElementById('tprev').style.display = document.getElementById('tnext').style.display = tour.active ? '' : 'none';
     var fold = document.getElementById('fold');
     if (!G.groups.length) fold.style.display = 'none';
     var anyOpen = G.groups.some(function (g) { return g.node && !state.collapsed[g.id]; });
     fold.textContent = anyOpen ? 'Fold groups' : 'Unfold groups';
-    hintEl.textContent = flat
+    hintEl.textContent = tour.active
+      ? 'Touring node by node in order of appearance. Pause stops on the current node; then drag to look around, or use the arrows to step.'
+      : flat
       ? 'Top to bottom is the order of telling. One finger drags, two fingers pinch to zoom. Tap a node to focus on it and its neighbours; tap empty space to clear.'
       : 'One finger rotates, two fingers pinch and twist. Tap a node to focus on it and its neighbours; tap empty space to clear.';
   }
@@ -675,6 +763,7 @@
   function bindControls() {
     svg.addEventListener('pointerdown', function (e) {
       state.tgt = null; state.panT = null;
+      if (tour.active && tour.playing) pauseTour();
       pts[e.pointerId] = { x: e.clientX, y: e.clientY };
       var n = Object.keys(pts).length;
       if (n === 1) state.moved = 0;
@@ -696,7 +785,7 @@
         }
       } else if (n === 2) {
         var t = twoPointers();
-        state.zm = clamp(state.zm * t.d / pd, 0.4, 3);
+        zoomTo(state.zm * t.d / pd);
         if (state.mode !== 'flat') state.roll += t.a - pa;
         pd = t.d; pa = t.a; state.moved = 99;
       }
@@ -710,16 +799,16 @@
     window.addEventListener('pointercancel', up);
     svg.addEventListener('wheel', function (e) {
       e.preventDefault();
-      state.zm = clamp(state.zm * (e.deltaY < 0 ? 1.1 : 0.9), 0.4, 3);
-      dirty = true;
+      zoomTo(state.zm * (e.deltaY < 0 ? 1.1 : 0.9));
     }, { passive: false });
     document.getElementById('bg').addEventListener('click', function () {
       if (state.moved > 6) return;
       clearSel();
     });
-    document.getElementById('zin').addEventListener('click', function () { state.zm = clamp(state.zm * 1.25, 0.4, 3); dirty = true; });
-    document.getElementById('zout').addEventListener('click', function () { state.zm = clamp(state.zm / 1.25, 0.4, 3); dirty = true; });
+    document.getElementById('zin').addEventListener('click', function () { zoomTo(state.zm * 1.25); });
+    document.getElementById('zout').addEventListener('click', function () { zoomTo(state.zm / 1.25); });
     document.getElementById('reset').addEventListener('click', function () {
+      stopTour();
       fit();
       if (state.mode === '3d') state.zm = clamp(state.zm * (laneK > 1.5 ? 0.72 : 0.6), 0.4, 3);
       setMode(state.mode); dirty = true;
@@ -728,6 +817,14 @@
       setMode(state.mode === 'flat' ? '3d' : 'flat');
       dirty = true;
     });
+    document.getElementById('tour').addEventListener('click', function () {
+      if (!tour.active) startTour();
+      else if (tour.playing) pauseTour();
+      else if (tour.ended) { tourGo(0); resumeTour(); }
+      else resumeTour();
+    });
+    document.getElementById('tprev').addEventListener('click', function () { tourGo(tour.i - 1); });
+    document.getElementById('tnext').addEventListener('click', function () { tourGo(tour.i + 1); });
     document.getElementById('spin').addEventListener('click', function () {
       state.auto = !state.auto;
       updateButtons();
@@ -752,6 +849,21 @@
       moving = true;
     } else if (state.auto && state.mode === '3d' && state.story < 0 && Object.keys(pts).length === 0 && !state.sel && !state.selE) {
       state.ang += 0.004;
+      moving = true;
+    }
+    if (tour.active && state.mode === '3d') {
+      var idle = Object.keys(pts).length === 0;
+      if (tour.playing && idle && !state.tgt) state.ang += 0.003;
+      if (tour.playing && performance.now() >= tour.until) {
+        if (tour.i < tour.order.length - 1) tourGo(tour.i + 1);
+        else { tour.playing = false; tour.ended = true; updateButtons(); showCaption(tour.node, 'End of the tour. Press Replay to go again.'); }
+      }
+      if (tour.node && idle && !state.tgt && isFinite(tour.node.px)) {
+        // Keep the current node in the middle of the view; this is what makes it feel like flying between nodes.
+        state.panX += (VW / 2 - (tour.node.px - state.panX) - state.panX) * 0.09;
+        state.panY += (300 - (tour.node.py - state.panY) - state.panY) * 0.09;
+        state.zm += (tour.zoom - state.zm) * 0.05;
+      }
       moving = true;
     }
     if (Math.abs(state.depthT - state.depth) > 0.002) {

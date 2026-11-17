@@ -52,3 +52,7 @@ If the site should be private, put it behind Cloudflare Access or do not share t
 - `groups`: clusters that start folded and open on tap.
 - `story`: steps list node ids and edge ids (not positions), so inserting an edge never breaks a step.
 - `meta.showSources`: `false` hides book and page references on the page. They stay in the data. Set `meta.credit` to an empty string to remove the footer line.
+
+## Tour
+
+In the 3D view, "Start tour" flies the camera from node to node in order of appearance and shows a short caption for each. "Pause tour" stops on the current node, and you can then drag to look around. The arrows step to the previous or next node, and tapping a node moves the tour there. The time spent per node is `DWELL` at the top of `public/app.js`.
