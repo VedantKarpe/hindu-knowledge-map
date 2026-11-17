@@ -23,6 +23,7 @@
   };
   var VW = 380, laneK = 1;
   var DWELL = 5000;   // ms spent at each node while the tour plays
+  var storyAuto = { playing: false, ended: false, until: 0, dwell: 0 };
   var tour = { active: false, playing: false, ended: false, i: 0, order: [], node: null, until: 0, remaining: 0, zoom: 1 };
   var pts = {}, pd = 0, pa = 0;
   var G, byId = {}, edgeById = {}, items = [], edgeObjs = [], rows = 1, dirty = true;
@@ -606,10 +607,14 @@
 
   function renderStoryPanel() {
     if (state.story < 0) {
-      storyEl.innerHTML = '<div>Walk the ' + G.story.length + ' beats in the order they are told, with the rest of the graph dimmed.</div><button id="go" style="margin-top:8px">Start the story &#9654;</button>';
+      storyEl.innerHTML = '<div>Walk the ' + G.story.length + ' beats in the order they are told, with the rest of the graph dimmed.</div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button id="go">Start the story &#9654;</button><button id="gp">Play automatically</button></div>';
       document.getElementById('go').addEventListener('click', function () { setStory(0); });
+      document.getElementById('gp').addEventListener('click', function () { setStory(0); playStory(); });
       return;
     }
+    var last = state.story >= G.story.length - 1;
+    var playLabel = storyAuto.playing ? 'Pause' : (last && storyAuto.ended ? 'Replay' : 'Play');
     var s = G.story[state.story];
     var nn = s.nodes.map(function (k) { return '#' + byId[k].no + ' ' + esc(byId[k].label); }).join(', ');
     storyEl.innerHTML = '<div class="muted">Step ' + (state.story + 1) + ' of ' + G.story.length +
@@ -617,16 +622,55 @@
       '<p class="detail-title">' + esc(s.title) + '</p><div>' + txt(s.text) + '</div>' +
       '<div class="muted" style="margin-top:4px">Nodes: ' + nn + '</div>' +
       '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button id="pv">&#9664; Back</button><button id="nx">' +
-      (state.story < G.story.length - 1 ? 'Next &#9654;' : 'Done') + '</button><button id="ex">Explore freely</button></div>';
-    document.getElementById('pv').addEventListener('click', function () { setStory(state.story - 1); });
+      (state.story < G.story.length - 1 ? 'Next &#9654;' : 'Done') + '</button><button id="pl">' + playLabel +
+      '</button><button id="ex">Explore freely</button></div>' +
+      (storyAuto.playing ? '<div class="story-bar"><i style="animation-duration:' + storyAuto.dwell + 'ms"></i></div>' : '');
+    document.getElementById('pv').addEventListener('click', function () { stepStory(state.story - 1); });
     document.getElementById('nx').addEventListener('click', function () {
-      state.story < G.story.length - 1 ? setStory(state.story + 1) : setStory(-1);
+      state.story < G.story.length - 1 ? stepStory(state.story + 1) : setStory(-1);
+    });
+    document.getElementById('pl').addEventListener('click', function () {
+      if (storyAuto.playing) pauseStory();
+      else if (last && storyAuto.ended) { setStory(0); playStory(); }
+      else playStory();
     });
     document.getElementById('ex').addEventListener('click', function () { setStory(-1); });
   }
 
+  // ---------- story autoplay ----------
+
+  // Time on a step grows with the length of its text, so long beats can be read.
+  function storyDwell(i) {
+    var words = String(G.story[i].text || '').split(/\s+/).length;
+    return clamp(words * 320, 6000, 20000);
+  }
+
+  function playStory() {
+    storyAuto.playing = true; storyAuto.ended = false;
+    storyAuto.dwell = storyDwell(state.story);
+    storyAuto.until = performance.now() + storyAuto.dwell;
+    renderStoryPanel();
+  }
+
+  function pauseStory() {
+    if (!storyAuto.playing) return;
+    storyAuto.playing = false;
+    renderStoryPanel();
+  }
+
+  // A manual step pauses autoplay, so the reader stays in control.
+  function stepStory(i) {
+    storyAuto.playing = false; storyAuto.ended = false;
+    setStory(i);
+  }
+
   function setStory(i) {
     state.story = Math.max(-1, Math.min(G.story.length - 1, i));
+    if (state.story < 0) { storyAuto.playing = false; storyAuto.ended = false; }
+    else if (storyAuto.playing) {
+      storyAuto.dwell = storyDwell(state.story);
+      storyAuto.until = performance.now() + storyAuto.dwell;
+    }
     if (state.story >= 0) {
       state.sel = null; state.selE = null;
       var any = false;
@@ -764,6 +808,7 @@
     svg.addEventListener('pointerdown', function (e) {
       state.tgt = null; state.panT = null;
       if (tour.active && tour.playing) pauseTour();
+      if (storyAuto.playing) pauseStory();
       pts[e.pointerId] = { x: e.clientX, y: e.clientY };
       var n = Object.keys(pts).length;
       if (n === 1) state.moved = 0;
@@ -850,6 +895,10 @@
     } else if (state.auto && state.mode === '3d' && state.story < 0 && Object.keys(pts).length === 0 && !state.sel && !state.selE) {
       state.ang += 0.004;
       moving = true;
+    }
+    if (storyAuto.playing && state.story >= 0 && performance.now() >= storyAuto.until) {
+      if (state.story < G.story.length - 1) setStory(state.story + 1);
+      else { storyAuto.playing = false; storyAuto.ended = true; renderStoryPanel(); }
     }
     if (tour.active && state.mode === '3d') {
       var idle = Object.keys(pts).length === 0;
