@@ -23,7 +23,8 @@
   };
   var VW = 380, laneK = 1;
   var DWELL = 5000;   // ms spent at each node while the tour plays
-  var storyAuto = { playing: false, ended: false, until: 0, dwell: 0 };
+  var storyAuto = { playing: false, ended: false, until: 0, dwell: 0, stepStart: 0, nodeUntil: 0, k: 0, focus: null, speed: 1, zoom: 1.6 };
+  try { var sp = +localStorage.getItem('katha.speed'); if (sp > 0) storyAuto.speed = sp; } catch (e) {}
   var tour = { active: false, playing: false, ended: false, i: 0, order: [], node: null, until: 0, remaining: 0, zoom: 1 };
   var pts = {}, pd = 0, pa = 0;
   var G, byId = {}, edgeById = {}, items = [], edgeObjs = [], rows = 1, dirty = true;
@@ -443,7 +444,7 @@
       }
       if (n.ring) { n.ring.setAttribute('cx', n.px); n.ring.setAttribute('cy', n.py); n.ring.setAttribute('r', r + 3.5); }
       var lit = state.sel === n.id || hn[n.id];
-      n.shape.setAttribute('stroke-width', lit ? '2.2' : '0.6');
+      n.shape.setAttribute('stroke-width', storyAuto.focus === n ? '3.6' : lit ? '2.2' : '0.6');
       n.numEl.setAttribute('x', n.px); n.numEl.setAttribute('y', n.py);
       n.numEl.style.display = r >= 6 ? 'block' : 'none';
       var side = LABEL_LEFT[n.type] ? -1 : 1;
@@ -605,8 +606,11 @@
 
   // ---------- story mode ----------
 
+  var SPEEDS = [0.5, 0.75, 1, 1.5, 2];
+
   function renderStoryPanel() {
     if (state.story < 0) {
+      hideCaption();
       storyEl.innerHTML = '<div>Walk the ' + G.story.length + ' beats in the order they are told, with the rest of the graph dimmed.</div>' +
         '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button id="go">Start the story &#9654;</button><button id="gp">Play automatically</button></div>';
       document.getElementById('go').addEventListener('click', function () { setStory(0); });
@@ -616,39 +620,80 @@
     var last = state.story >= G.story.length - 1;
     var playLabel = storyAuto.playing ? 'Pause' : (last && storyAuto.ended ? 'Replay' : 'Play');
     var s = G.story[state.story];
-    var nn = s.nodes.map(function (k) { return '#' + byId[k].no + ' ' + esc(byId[k].label); }).join(', ');
+    var opts = SPEEDS.map(function (v) {
+      return '<option value="' + v + '"' + (v === storyAuto.speed ? ' selected' : '') + '>' + v + '&times;</option>';
+    }).join('');
     storyEl.innerHTML = '<div class="muted">Step ' + (state.story + 1) + ' of ' + G.story.length +
       (G.meta.showSources ? ' &middot; p.' + esc(s.pages) : '') + '</div>' +
-      '<p class="detail-title">' + esc(s.title) + '</p><div>' + txt(s.text) + '</div>' +
-      '<div class="muted" style="margin-top:4px">Nodes: ' + nn + '</div>' +
-      '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button id="pv">&#9664; Back</button><button id="nx">' +
-      (state.story < G.story.length - 1 ? 'Next &#9654;' : 'Done') + '</button><button id="pl">' + playLabel +
-      '</button><button id="ex">Explore freely</button></div>' +
-      (storyAuto.playing ? '<div class="story-bar"><i style="animation-duration:' + storyAuto.dwell + 'ms"></i></div>' : '');
+      '<p class="detail-title">' + esc(s.title) + '</p>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><button id="pv">&#9664; Back</button><button id="nx">' +
+      (last ? 'Done' : 'Next &#9654;') + '</button><button id="pl">' + playLabel +
+      '</button><label class="muted">Speed <select id="spd" aria-label="Autoplay speed">' + opts + '</select></label>' +
+      '<button id="ex">Explore freely</button></div>';
     document.getElementById('pv').addEventListener('click', function () { stepStory(state.story - 1); });
     document.getElementById('nx').addEventListener('click', function () {
-      state.story < G.story.length - 1 ? stepStory(state.story + 1) : setStory(-1);
+      if (last) setStory(-1); else stepStory(state.story + 1);
     });
     document.getElementById('pl').addEventListener('click', function () {
       if (storyAuto.playing) pauseStory();
+      if (state.story >= 0 && storyAuto.focus) { storyAuto.focus = null; showStoryCaption(); }
       else if (last && storyAuto.ended) { setStory(0); playStory(); }
       else playStory();
     });
+    document.getElementById('spd').addEventListener('change', function () { setSpeed(+this.value); });
     document.getElementById('ex').addEventListener('click', function () { setStory(-1); });
+    showStoryCaption();
+  }
+
+  // The step's text sits over the graph, with the node the camera is on and a progress bar.
+  function showStoryCaption() {
+    var c = document.getElementById('caption');
+    if (!c || state.story < 0) return;
+    var s = G.story[state.story], f = storyAuto.focus;
+    var nn = stepNodes().map(function (n) {
+      return '<span' + (n === f ? ' class="now"' : '') + '>#' + n.no + ' ' + esc(n.label) + '</span>';
+    }).join(', ');
+    c.innerHTML = '<strong>' + esc(s.title) + '</strong> <span class="muted">' + (state.story + 1) + ' of ' + G.story.length + '</span>' +
+      '<div>' + txt(s.text) + '</div><div class="muted cap-nodes">' + nn + '</div>' +
+      (storyAuto.playing ? '<div class="story-bar"><i style="animation-duration:' + Math.max(0, Math.round(storyAuto.until - performance.now())) + 'ms"></i></div>' : '');
+    c.hidden = false;
   }
 
   // ---------- story autoplay ----------
 
-  // Time on a step grows with the length of its text, so long beats can be read.
+  // Time on a step grows with its text and its node count, divided by the chosen speed.
   function storyDwell(i) {
-    var words = String(G.story[i].text || '').split(/\s+/).length;
-    return clamp(words * 320, 6000, 20000);
+    var s = G.story[i];
+    var words = String(s.text || '').split(/\s+/).length;
+    return Math.max(clamp(words * 320, 6000, 20000), s.nodes.length * 2500) / storyAuto.speed;
+  }
+
+  function stepNodes() {
+    var seen = [];
+    G.story[state.story].nodes.forEach(function (k) { var n = rep(k); if (seen.indexOf(n) < 0) seen.push(n); });
+    return seen;
+  }
+
+  // Point the camera at node k of the current step.
+  function focusNode(k) {
+    var ns = stepNodes();
+    storyAuto.k = clamp(k, 0, ns.length - 1);
+    storyAuto.focus = ns[storyAuto.k];
+    state.panT = null;
+    storyAuto.nodeUntil = storyAuto.stepStart + storyAuto.dwell / ns.length * (storyAuto.k + 1);
+    dirty = true;
+  }
+
+  function startStepTimer() {
+    storyAuto.dwell = storyDwell(state.story);
+    storyAuto.stepStart = performance.now();
+    storyAuto.until = storyAuto.stepStart + storyAuto.dwell;
   }
 
   function playStory() {
     storyAuto.playing = true; storyAuto.ended = false;
-    storyAuto.dwell = storyDwell(state.story);
-    storyAuto.until = performance.now() + storyAuto.dwell;
+    startStepTimer();
+    focusNode(0);
     renderStoryPanel();
   }
 
@@ -658,29 +703,49 @@
     renderStoryPanel();
   }
 
+  function setSpeed(v) {
+    var old = storyAuto.speed;
+    storyAuto.speed = v;
+    try { localStorage.setItem('katha.speed', String(v)); } catch (e) {}
+    if (storyAuto.playing) {
+      // Keep the place within the step; only the time still to go is rescaled.
+      var now = performance.now(), ns = stepNodes().length;
+      var done = (now - storyAuto.stepStart) / storyAuto.dwell;
+      storyAuto.dwell = storyAuto.dwell * old / v;
+      storyAuto.stepStart = now - done * storyAuto.dwell;
+      storyAuto.until = storyAuto.stepStart + storyAuto.dwell;
+      storyAuto.nodeUntil = storyAuto.stepStart + storyAuto.dwell / ns * (storyAuto.k + 1);
+      showStoryCaption();
+    }
+  }
+
   // A manual step pauses autoplay, so the reader stays in control.
   function stepStory(i) {
     storyAuto.playing = false; storyAuto.ended = false;
     setStory(i);
   }
 
+  // Called every frame: move to the next node, then the next step, when their time is up.
+  function storyTick() {
+    if (!storyAuto.playing || state.story < 0) return;
+    if (performance.now() < storyAuto.nodeUntil) return;
+    if (storyAuto.k < stepNodes().length - 1) { focusNode(storyAuto.k + 1); showStoryCaption(); }
+    else if (state.story < G.story.length - 1) setStory(state.story + 1);
+    else { storyAuto.playing = false; storyAuto.ended = true; renderStoryPanel(); }
+  }
+
   function setStory(i) {
     state.story = Math.max(-1, Math.min(G.story.length - 1, i));
+    storyAuto.focus = null;
     if (state.story < 0) { storyAuto.playing = false; storyAuto.ended = false; }
-    else if (storyAuto.playing) {
-      storyAuto.dwell = storyDwell(state.story);
-      storyAuto.until = performance.now() + storyAuto.dwell;
-    }
     if (state.story >= 0) {
       state.sel = null; state.selE = null;
       var any = false;
       G.groups.forEach(function (g) { if (state.collapsed[g.id]) { state.collapsed[g.id] = false; any = true; } });
       if (any) layout();
       setMode('flat');
-      // Bring the step's nodes to the middle of the view.
-      var ns = G.story[state.story].nodes, sum = 0;
-      ns.forEach(function (k) { sum += byId[k].tY; });
-      panTo(sum / ns.length);
+      startStepTimer();
+      focusNode(0);
       updateButtons();
     }
     renderStoryPanel();
@@ -809,6 +874,7 @@
       state.tgt = null; state.panT = null;
       if (tour.active && tour.playing) pauseTour();
       if (storyAuto.playing) pauseStory();
+      if (state.story >= 0 && storyAuto.focus) { storyAuto.focus = null; showStoryCaption(); }
       pts[e.pointerId] = { x: e.clientX, y: e.clientY };
       var n = Object.keys(pts).length;
       if (n === 1) state.moved = 0;
@@ -896,9 +962,14 @@
       state.ang += 0.004;
       moving = true;
     }
-    if (storyAuto.playing && state.story >= 0 && performance.now() >= storyAuto.until) {
-      if (state.story < G.story.length - 1) setStory(state.story + 1);
-      else { storyAuto.playing = false; storyAuto.ended = true; renderStoryPanel(); }
+    storyTick();
+    if (state.story >= 0 && storyAuto.focus && Object.keys(pts).length === 0 && isFinite(storyAuto.focus.px)) {
+      // Fly to the node in focus: centre it and zoom in, the same way the tour does.
+      var f = storyAuto.focus;
+      state.panX += (VW / 2 - (f.px - state.panX) - state.panX) * 0.08;
+      state.panY += (230 - (f.py - state.panY) - state.panY) * 0.08;
+      state.zm += (storyAuto.zoom - state.zm) * 0.05;
+      moving = true;
     }
     if (tour.active && state.mode === '3d') {
       var idle = Object.keys(pts).length === 0;
