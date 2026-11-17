@@ -636,7 +636,6 @@
     });
     document.getElementById('pl').addEventListener('click', function () {
       if (storyAuto.playing) pauseStory();
-      if (state.story >= 0 && storyAuto.focus) { storyAuto.focus = null; showStoryCaption(); }
       else if (last && storyAuto.ended) { setStory(0); playStory(); }
       else playStory();
     });
@@ -686,26 +685,37 @@
 
   function startStepTimer() {
     storyAuto.dwell = storyDwell(state.story);
+    storyAuto.elapsed = 0;
     storyAuto.stepStart = performance.now();
     storyAuto.until = storyAuto.stepStart + storyAuto.dwell;
   }
 
+  // Play picks up where the step was left: same node, same time already spent on it.
   function playStory() {
     storyAuto.playing = true; storyAuto.ended = false;
-    startStepTimer();
-    focusNode(0);
+    var ns = stepNodes().length, per = storyAuto.dwell / ns;
+    var spent = clamp(storyAuto.elapsed, storyAuto.k * per, (storyAuto.k + 1) * per - 1500 / storyAuto.speed);
+    storyAuto.stepStart = performance.now() - Math.max(0, spent);
+    storyAuto.until = storyAuto.stepStart + storyAuto.dwell;
+    focusNode(storyAuto.k);
     renderStoryPanel();
   }
 
   function pauseStory() {
     if (!storyAuto.playing) return;
     storyAuto.playing = false;
+    storyAuto.elapsed = performance.now() - storyAuto.stepStart;
     renderStoryPanel();
   }
 
   function setSpeed(v) {
     var old = storyAuto.speed;
     storyAuto.speed = v;
+    if (!storyAuto.playing && state.story >= 0) {
+      // Paused: rescale the step so resuming keeps the same place.
+      storyAuto.elapsed *= old / v;
+      storyAuto.dwell *= old / v;
+    }
     try { localStorage.setItem('katha.speed', String(v)); } catch (e) {}
     if (storyAuto.playing) {
       // Keep the place within the step; only the time still to go is rescaled.
