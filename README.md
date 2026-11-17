@@ -1,4 +1,4 @@
-# Hindu knowledge map
+# Katha
 
 The site title and subtitle live in `public/data/graph.js` under `meta.title` and `meta.subtitle`.
 

@@ -2,8 +2,8 @@
 // Keep the "window.GRAPH_DATA = " wrapper and the final semicolon.
 window.GRAPH_DATA = {
   "meta": {
-    "title": "Hindu knowledge map",
-    "subtitle": "A graph of the stories from the books I am reading, in the order they are told. So far: 3 chapters.",
+    "title": "Katha",
+    "subtitle": "Hindu texts, connected. A graph of the stories from the books I am reading, in the order they are told. So far: 3 chapters.",
     "credit": "Notes based on Mahagatha by Satyarth Nayak (HarperCollins). Summaries are in my own words. Page numbers refer to the book; an asterisk means the number is inferred. Chapters 1-3 so far.",
     "source": "Mahagatha (Nayak)",
     "showSources": false
