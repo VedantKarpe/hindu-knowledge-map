@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hindu knowledge map</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1 id="title">Hindu knowledge map</h1>
+  <p class="lede" id="lede">A rotatable graph of the stories from the books I am reading.</p>
+
+  <section id="story" class="card" aria-live="polite"></section>
+
+  <div class="controls">
+    <input id="q" type="search" placeholder="Search names and descriptions" aria-label="Search the graph">
+    <span id="count" class="muted"></span>
+  </div>
+  <div class="chips" id="f-book"></div>
+  <div class="chips" id="f-chapter"></div>
+  <div class="chips" id="f-type"></div>
+
+  <div class="controls">
+    <button id="zin" aria-label="Zoom in">+</button>
+    <button id="zout" aria-label="Zoom out">&minus;</button>
+    <button id="reset">Fit</button>
+    <button id="mode">3D view</button>
+    <button id="spin">Spin</button>
+    <button id="fold">Unfold groups</button>
+  </div>
+
+  <div class="legend">
+    <span><i class="dot t-concept"></i> concept</span>
+    <span><i class="dot t-deity"></i> deity</span>
+    <span><i class="dot dia t-event"></i> event</span>
+    <span><i class="dot t-being"></i> being</span>
+    <span><i class="dot t-place"></i> place or thing</span>
+    <span><i class="dot t-open"></i> open thread</span>
+    <span><i class="dot ringed t-concept"></i> folded group</span>
+  </div>
+  <div class="legend" id="legend-edges"></div>
+  <p class="hint">Number = order of first appearance. Bigger node = more connections.</p>
+
+  <div id="graph-col">
+  <div id="graph-wrap">
+  <svg id="graph" viewBox="0 0 380 600" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Graph of entities, events and the links between them, in order of telling">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    <rect id="bg" x="0" y="0" width="380" height="600" fill="transparent"/>
+    <g id="edges"></g><g id="nodes"></g><g id="labels"></g>
+  </svg>
+  </div>
+  <p class="hint" id="hint"></p>
+  </div>
+
+  <section id="detail" class="card" aria-live="polite">
+    <p class="muted">Tap a node or a line to read its description here.</p>
+  </section>
+
+  <h2>Index, in order of first appearance</h2>
+  <div id="index" class="index"></div>
+</main>
+<footer id="credit"></footer>
+<script src="data/graph.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
